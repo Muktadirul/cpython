@@ -549,8 +549,23 @@ w_complex_object(PyObject *v, char flag, WFILE *p)
         w_long(co->co_flags, p);
         w_object(co->co_code, p);
         w_object(co->co_consts, p);
-        w_object(co->co_names, p);
-        w_object(co->co_varnames, p);
+        //w_object(co->co_names, p);
+        PyObject *t = PyTuple_GetSlice(co->co_data, 0, co->co_nnames);
+        if (t == NULL) {
+            p->error = WFERR_NOMEMORY;
+            return;
+        }
+        w_object(t, p);
+        Py_DECREF(t);
+        //w_object(co->co_varnames, p);
+        t = PyTuple_GetSlice(co->co_data, co->co_nnames,
+                             co->co_nnames + co->co_nvarnames);
+        if (t == NULL) {
+            p->error = WFERR_NOMEMORY;
+            return;
+        }
+        w_object(t, p);
+        Py_DECREF(t);
         w_object(co->co_freevars, p);
         w_object(co->co_cellvars, p);
         w_object(co->co_filename, p);

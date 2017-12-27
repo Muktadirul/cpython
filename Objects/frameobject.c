@@ -764,15 +764,13 @@ PyFrame_BlockPop(PyFrameObject *f)
  */
 
 static int
-map_to_dict(PyObject *map, Py_ssize_t nmap, PyObject *dict, PyObject **values,
+map_to_dict(PyObject **map, Py_ssize_t nmap, PyObject *dict, PyObject **values,
             int deref)
 {
     Py_ssize_t j;
-    assert(PyTuple_Check(map));
     assert(PyDict_Check(dict));
-    assert(PyTuple_Size(map) >= nmap);
     for (j=0; j < nmap; j++) {
-        PyObject *key = PyTuple_GET_ITEM(map, j);
+        PyObject *key = map[j];
         PyObject *value = values[j];
         assert(PyUnicode_Check(key));
         if (deref && value != NULL) {
@@ -817,15 +815,13 @@ map_to_dict(PyObject *map, Py_ssize_t nmap, PyObject *dict, PyObject **values,
 */
 
 static void
-dict_to_map(PyObject *map, Py_ssize_t nmap, PyObject *dict, PyObject **values,
+dict_to_map(PyObject **map, Py_ssize_t nmap, PyObject *dict, PyObject **values,
             int deref, int clear)
 {
     Py_ssize_t j;
-    assert(PyTuple_Check(map));
     assert(PyDict_Check(dict));
-    assert(PyTuple_Size(map) >= nmap);
     for (j=0; j < nmap; j++) {
-        PyObject *key = PyTuple_GET_ITEM(map, j);
+        PyObject *key = map[j];
         PyObject *value = PyObject_GetItem(dict, key);
         assert(PyUnicode_Check(key));
         /* We only care about NULLs if clear is true. */
@@ -852,7 +848,7 @@ int
 PyFrame_FastToLocalsWithError(PyFrameObject *f)
 {
     /* Merge fast locals into f->f_locals */
-    PyObject *locals, *map;
+    PyObject *locals, **map;
     PyObject **fast;
     PyCodeObject *co;
     Py_ssize_t j;
@@ -869,15 +865,16 @@ PyFrame_FastToLocalsWithError(PyFrameObject *f)
             return -1;
     }
     co = f->f_code;
-    map = co->co_varnames;
-    if (!PyTuple_Check(map)) {
+    if (!PyTuple_Check(co->co_data)) {
         PyErr_Format(PyExc_SystemError,
-                     "co_varnames must be a tuple, not %s",
-                     Py_TYPE(map)->tp_name);
+                     "co_names must be a tuple, not %s",
+                     Py_TYPE(co->co_data)->tp_name);
         return -1;
     }
+    //map = co->co_varnames;
+    map = &PyTuple_GET_ITEM(co->co_data, co->co_nnames);
     fast = f->f_localsplus;
-    j = PyTuple_GET_SIZE(map);
+    j = co->co_nvarnames;
     if (j > co->co_nlocals)
         j = co->co_nlocals;
     if (co->co_nlocals) {
@@ -887,7 +884,7 @@ PyFrame_FastToLocalsWithError(PyFrameObject *f)
     ncells = PyTuple_GET_SIZE(co->co_cellvars);
     nfreevars = PyTuple_GET_SIZE(co->co_freevars);
     if (ncells || nfreevars) {
-        if (map_to_dict(co->co_cellvars, ncells,
+        if (map_to_dict(&PyTuple_GET_ITEM(co->co_cellvars, 0), ncells,
                         locals, fast + co->co_nlocals, 1))
             return -1;
 
@@ -900,7 +897,7 @@ PyFrame_FastToLocalsWithError(PyFrameObject *f)
            into the locals dict used by the class.
         */
         if (co->co_flags & CO_OPTIMIZED) {
-            if (map_to_dict(co->co_freevars, nfreevars,
+            if (map_to_dict(&PyTuple_GET_ITEM(co->co_freevars, 0), nfreevars,
                             locals, fast + co->co_nlocals + ncells, 1) < 0)
                 return -1;
         }
@@ -924,7 +921,7 @@ void
 PyFrame_LocalsToFast(PyFrameObject *f, int clear)
 {
     /* Merge f->f_locals into fast locals */
-    PyObject *locals, *map;
+    PyObject *locals, **map;
     PyObject **fast;
     PyObject *error_type, *error_value, *error_traceback;
     PyCodeObject *co;
@@ -934,26 +931,26 @@ PyFrame_LocalsToFast(PyFrameObject *f, int clear)
         return;
     locals = f->f_locals;
     co = f->f_code;
-    map = co->co_varnames;
     if (locals == NULL)
         return;
-    if (!PyTuple_Check(map))
+    if (!PyTuple_Check(co->co_data))
         return;
+    map = &PyTuple_GET_ITEM(co->co_data, co->co_nnames);
     PyErr_Fetch(&error_type, &error_value, &error_traceback);
     fast = f->f_localsplus;
-    j = PyTuple_GET_SIZE(map);
+    j = co->co_nvarnames;
     if (j > co->co_nlocals)
         j = co->co_nlocals;
     if (co->co_nlocals)
-        dict_to_map(co->co_varnames, j, locals, fast, 0, clear);
+        dict_to_map(map, j, locals, fast, 0, clear);
     ncells = PyTuple_GET_SIZE(co->co_cellvars);
     nfreevars = PyTuple_GET_SIZE(co->co_freevars);
     if (ncells || nfreevars) {
-        dict_to_map(co->co_cellvars, ncells,
+        dict_to_map(&PyTuple_GET_ITEM(co->co_cellvars, 0), ncells,
                     locals, fast + co->co_nlocals, 1, clear);
         /* Same test as in PyFrame_FastToLocals() above. */
         if (co->co_flags & CO_OPTIMIZED) {
-            dict_to_map(co->co_freevars, nfreevars,
+            dict_to_map(&PyTuple_GET_ITEM(co->co_freevars, 0), nfreevars,
                 locals, fast + co->co_nlocals + ncells, 1,
                 clear);
         }

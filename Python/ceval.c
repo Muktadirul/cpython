@@ -862,7 +862,7 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
         dtrace_function_entry(f);
 
     co = f->f_code;
-    names = co->co_names;
+    names = co->co_data;
     consts = co->co_consts;
     fastlocals = f->f_localsplus;
     freevars = f->f_localsplus + co->co_nlocals;
@@ -1054,7 +1054,7 @@ main_loop:
             if (value == NULL) {
                 format_exc_check_arg(PyExc_UnboundLocalError,
                                      UNBOUNDLOCAL_ERROR_MSG,
-                                     PyTuple_GetItem(co->co_varnames, oparg));
+                                     GETITEM(names, co->co_nnames + oparg));
                 goto error;
             }
             Py_INCREF(value);
@@ -2212,7 +2212,7 @@ main_loop:
             format_exc_check_arg(
                 PyExc_UnboundLocalError,
                 UNBOUNDLOCAL_ERROR_MSG,
-                PyTuple_GetItem(co->co_varnames, oparg)
+                GETITEM(names, co->co_nnames + oparg)
                 );
             goto error;
         }
@@ -3564,7 +3564,7 @@ missing_arguments(PyCodeObject *co, Py_ssize_t missing, Py_ssize_t defcount,
     }
     for (i = start; i < end; i++) {
         if (GETLOCAL(i) == NULL) {
-            PyObject *raw = PyTuple_GET_ITEM(co->co_varnames, i);
+            PyObject *raw = GETITEM(co->co_data, co->co_nnames + i);
             PyObject *name = PyObject_Repr(raw);
             if (name == NULL) {
                 Py_DECREF(missing_names);
@@ -3732,7 +3732,8 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
 
         /* Speed hack: do raw pointer compares. As names are
            normally interned this should almost always hit. */
-        co_varnames = ((PyTupleObject *)(co->co_varnames))->ob_item;
+        co_varnames = ((PyTupleObject *)(co->co_data))->ob_item
+            + co->co_nnames;
         for (j = 0; j < total_args; j++) {
             PyObject *name = co_varnames[j];
             if (name == keyword) {
@@ -3815,7 +3816,7 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
             PyObject *name;
             if (GETLOCAL(i) != NULL)
                 continue;
-            name = PyTuple_GET_ITEM(co->co_varnames, i);
+            name = PyTuple_GET_ITEM(co->co_data, co->co_nnames + i);
             if (kwdefs != NULL) {
                 PyObject *def = PyDict_GetItem(kwdefs, name);
                 if (def) {
@@ -4974,7 +4975,8 @@ unicode_concatenate(PyObject *v, PyObject *w,
         }
         case STORE_NAME:
         {
-            PyObject *names = f->f_code->co_names;
+            assert(oparg < f->f_code->co_nnames);
+            PyObject *names = f->f_code->co_data;
             PyObject *name = GETITEM(names, oparg);
             PyObject *locals = f->f_locals;
             if (PyDict_CheckExact(locals) &&

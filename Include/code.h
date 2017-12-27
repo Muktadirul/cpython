@@ -26,10 +26,13 @@ typedef struct {
     int co_stacksize;           /* #entries needed for evaluation stack */
     int co_flags;               /* CO_..., see below */
     int co_firstlineno;         /* first source line number */
+    int co_nnames;
+    int co_nvarnames;
     PyObject *co_code;          /* instruction opcodes */
-    PyObject *co_consts;        /* list (constants used) */
-    PyObject *co_names;         /* list of strings (names used) */
-    PyObject *co_varnames;      /* tuple of strings (local variable names) */
+    PyObject *co_consts;        /* tuple (constants used) */
+    PyObject *co_data;          /* tuple of names + varnames */
+    //PyObject *co_names;        /* tuple of strings (names used) */
+    //PyObject *co_varnames;      /* tuple of strings (local variable names) */
     PyObject *co_freevars;      /* tuple of strings (free variable names) */
     PyObject *co_cellvars;      /* tuple of strings (cell variable names) */
     /* The rest aren't used in either hash or comparisons, except for co_name,

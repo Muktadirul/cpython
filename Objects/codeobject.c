@@ -178,6 +178,29 @@ PyCode_New(int argcount, int kwonlyargcount,
             PyMem_FREE(cell2arg);
         return NULL;
     }
+
+    co->co_nnames = PyTuple_GET_SIZE(names);
+    co->co_nvarnames = PyTuple_GET_SIZE(varnames);
+    // TODO: string only lightweight tuple type.
+    co->co_data = PyTuple_New(co->co_nnames + co->co_nvarnames);
+    if (co->co_data == NULL) {
+        if (cell2arg)
+            PyMem_FREE(cell2arg);
+        return NULL;
+    }
+
+    int pos = 0;
+    for (int i = 0; i < co->co_nnames; i++) {
+        PyObject *o = PyTuple_GET_ITEM(names, i);
+        Py_INCREF(o);
+        PyTuple_SET_ITEM(co->co_data, pos++, o);
+    }
+    for (int i = 0; i < co->co_nvarnames; i++) {
+        PyObject *o = PyTuple_GET_ITEM(varnames, i);
+        Py_INCREF(o);
+        PyTuple_SET_ITEM(co->co_data, pos++, o);
+    }
+
     co->co_argcount = argcount;
     co->co_kwonlyargcount = kwonlyargcount;
     co->co_nlocals = nlocals;
@@ -187,10 +210,6 @@ PyCode_New(int argcount, int kwonlyargcount,
     co->co_code = code;
     Py_INCREF(consts);
     co->co_consts = consts;
-    Py_INCREF(names);
-    co->co_names = names;
-    Py_INCREF(varnames);
-    co->co_varnames = varnames;
     Py_INCREF(freevars);
     co->co_freevars = freevars;
     Py_INCREF(cellvars);
@@ -267,8 +286,8 @@ static PyMemberDef code_memberlist[] = {
     {"co_flags",        T_INT,          OFF(co_flags),          READONLY},
     {"co_code",         T_OBJECT,       OFF(co_code),           READONLY},
     {"co_consts",       T_OBJECT,       OFF(co_consts),         READONLY},
-    {"co_names",        T_OBJECT,       OFF(co_names),          READONLY},
-    {"co_varnames",     T_OBJECT,       OFF(co_varnames),       READONLY},
+    //{"co_names",        T_OBJECT,       OFF(co_names),          READONLY},
+    //{"co_varnames",     T_OBJECT,       OFF(co_varnames),       READONLY},
     {"co_freevars",     T_OBJECT,       OFF(co_freevars),       READONLY},
     {"co_cellvars",     T_OBJECT,       OFF(co_cellvars),       READONLY},
     {"co_filename",     T_OBJECT,       OFF(co_filename),       READONLY},
@@ -276,6 +295,27 @@ static PyMemberDef code_memberlist[] = {
     {"co_firstlineno", T_INT,           OFF(co_firstlineno),    READONLY},
     {"co_lnotab",       T_OBJECT,       OFF(co_lnotab),         READONLY},
     {NULL}      /* Sentinel */
+};
+
+static PyObject*
+code_get_names(PyObject *code, void *unused)
+{
+    PyCodeObject *co = (PyCodeObject*)code;
+    return PyTuple_GetSlice(co->co_data, 0, co->co_nnames);
+}
+
+static PyObject*
+code_get_varnames(PyObject *code, void *unused)
+{
+    PyCodeObject *co = (PyCodeObject*)code;
+    return PyTuple_GetSlice(co->co_data, co->co_nnames,
+                            co->co_nnames + co->co_nvarnames);
+}
+
+static PyGetSetDef code_getset[] = {
+    {"co_names",    code_get_names},
+    {"co_varnames", code_get_varnames},
+    {NULL},
 };
 
 /* Helper for code_new: return a shallow copy of a tuple that is
@@ -432,8 +472,7 @@ code_dealloc(PyCodeObject *co)
 
     Py_XDECREF(co->co_code);
     Py_XDECREF(co->co_consts);
-    Py_XDECREF(co->co_names);
-    Py_XDECREF(co->co_varnames);
+    Py_XDECREF(co->co_data);
     Py_XDECREF(co->co_freevars);
     Py_XDECREF(co->co_cellvars);
     Py_XDECREF(co->co_filename);
@@ -652,10 +691,12 @@ code_richcompare(PyObject *self, PyObject *other, int op)
     Py_DECREF(consts2);
     if (eq <= 0) goto unequal;
 
-    eq = PyObject_RichCompareBool(co->co_names, cp->co_names, Py_EQ);
+    eq = PyObject_RichCompareBool(co->co_data, cp->co_data, Py_EQ);
     if (eq <= 0) goto unequal;
-    eq = PyObject_RichCompareBool(co->co_varnames, cp->co_varnames, Py_EQ);
-    if (eq <= 0) goto unequal;
+    //eq = PyObject_RichCompareBool(co->co_names, cp->co_names, Py_EQ);
+    //if (eq <= 0) goto unequal;
+    //eq = PyObject_RichCompareBool(co->co_varnames, cp->co_varnames, Py_EQ);
+    //if (eq <= 0) goto unequal;
     eq = PyObject_RichCompareBool(co->co_freevars, cp->co_freevars, Py_EQ);
     if (eq <= 0) goto unequal;
     eq = PyObject_RichCompareBool(co->co_cellvars, cp->co_cellvars, Py_EQ);
@@ -683,22 +724,25 @@ code_richcompare(PyObject *self, PyObject *other, int op)
 static Py_hash_t
 code_hash(PyCodeObject *co)
 {
-    Py_hash_t h, h0, h1, h2, h3, h4, h5, h6;
+    Py_hash_t h, h0, h1, h2, h3, h5, h6;
     h0 = PyObject_Hash(co->co_name);
     if (h0 == -1) return -1;
     h1 = PyObject_Hash(co->co_code);
     if (h1 == -1) return -1;
     h2 = PyObject_Hash(co->co_consts);
     if (h2 == -1) return -1;
-    h3 = PyObject_Hash(co->co_names);
+    h3 = PyObject_Hash(co->co_data);
     if (h3 == -1) return -1;
-    h4 = PyObject_Hash(co->co_varnames);
-    if (h4 == -1) return -1;
+    //h3 = PyObject_Hash(co->co_names);
+    //if (h3 == -1) return -1;
+    //h4 = PyObject_Hash(co->co_varnames);
+    //if (h4 == -1) return -1;
     h5 = PyObject_Hash(co->co_freevars);
     if (h5 == -1) return -1;
     h6 = PyObject_Hash(co->co_cellvars);
     if (h6 == -1) return -1;
-    h = h0 ^ h1 ^ h2 ^ h3 ^ h4 ^ h5 ^ h6 ^
+    //h = h0 ^ h1 ^ h2 ^ h3 ^ h4 ^ h5 ^ h6 ^
+    h = h0 ^ h1 ^ h2 ^ h3 ^ h5 ^ h6 ^
         co->co_argcount ^ co->co_kwonlyargcount ^
         co->co_nlocals ^ co->co_flags;
     if (h == -1) h = -2;
@@ -742,7 +786,7 @@ PyTypeObject PyCode_Type = {
     0,                                  /* tp_iternext */
     code_methods,                       /* tp_methods */
     code_memberlist,                    /* tp_members */
-    0,                                  /* tp_getset */
+    code_getset,                        /* tp_getset */
     0,                                  /* tp_base */
     0,                                  /* tp_dict */
     0,                                  /* tp_descr_get */

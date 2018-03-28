@@ -164,6 +164,8 @@ struct compiler {
     struct compiler_unit *u; /* compiler state for current block */
     PyObject *c_stack;           /* Python list holding compiler_unit ptrs */
     PyArena *c_arena;            /* pointer to memory allocation arena */
+    PyObject *c_shared_names;
+    PyObject *c_shared_codes; // List of code with dummy names
 };
 
 static int compiler_enter_scope(struct compiler *, identifier, int, void *, int);
@@ -210,6 +212,9 @@ static int compiler_async_comprehension_generator(
 
 static PyCodeObject *assemble(struct compiler *, int addNone);
 static PyObject *__doc__, *__annotations__;
+
+static PyObject *dict_keys_inorder(PyObject *dict, Py_ssize_t offset);
+
 
 #define CAPSULE_NAME "compile.c compiler unit"
 
@@ -290,6 +295,19 @@ compiler_init(struct compiler *c)
     if (!c->c_stack)
         return 0;
 
+    c->c_shared_names = PyDict_New();
+    if (!c->c_shared_names) {
+        Py_CLEAR(c->c_stack);
+        return 0;
+    }
+
+    c->c_shared_codes = PyList_New(0);
+    if (!c->c_shared_codes) {
+        Py_CLEAR(c->c_stack);
+        Py_CLEAR(c->c_shared_names);
+        return 0;
+    }
+
     return 1;
 }
 
@@ -343,6 +361,23 @@ PyAST_CompileObject(mod_ty mod, PyObject *filename, PyCompilerFlags *flags,
     }
 
     co = compiler_mod(&c, mod);
+    if (!co) {
+        goto finally;
+    }
+
+    PyObject *names = dict_keys_inorder(c.c_shared_names, 0);
+    if (!names) {
+        Py_CLEAR(co);
+        goto finally;
+    }
+
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(c.c_shared_codes); i++) {
+        Py_INCREF(names);
+        PyCodeObject *code = (PyCodeObject*)PyList_GET_ITEM(
+            c.c_shared_codes, i);
+        Py_SETREF(code->co_names, names);
+    }
+    Py_DECREF(names);
 
  finally:
     compiler_free(&c);
@@ -389,6 +424,7 @@ compiler_free(struct compiler *c)
         PyObject_Free(c->c_future);
     Py_XDECREF(c->c_filename);
     Py_DECREF(c->c_stack);
+    Py_DECREF(c->c_shared_codes);
 }
 
 static PyObject *
@@ -605,10 +641,16 @@ compiler_enter_scope(struct compiler *c, identifier name,
         compiler_unit_free(u);
         return 0;
     }
-    u->u_names = PyDict_New();
-    if (!u->u_names) {
-        compiler_unit_free(u);
-        return 0;
+    if (c->c_shared_names) {
+        u->u_names = c->c_shared_names;
+        Py_INCREF(u->u_names);
+    }
+    else {
+        u->u_names = PyDict_New();
+        if (!u->u_names) {
+            compiler_unit_free(u);
+            return 0;
+        }
     }
 
     u->u_private = NULL;
@@ -5363,7 +5405,12 @@ makecode(struct compiler *c, struct assembler *a)
     consts = PySequence_List(tmp); /* optimize_code requires a list */
     Py_DECREF(tmp);
 
-    names = dict_keys_inorder(c->u->u_names, 0);
+    if (c->c_shared_names == c->u->u_names) {
+        names = PyTuple_New(0); // dummy
+    }
+    else {
+        names = dict_keys_inorder(c->u->u_names, 0);
+    }
     varnames = dict_keys_inorder(c->u->u_varnames, 0);
     if (!consts || !names || !varnames)
         goto error;
@@ -5406,6 +5453,14 @@ makecode(struct compiler *c, struct assembler *a)
                     c->c_filename, c->u->u_name,
                     c->u->u_firstlineno,
                     a->a_lnotab);
+
+    if (c->c_shared_names == c->u->u_names) {
+        if (PyList_Append(c->c_shared_codes, (PyObject *)co) < 0) {
+            Py_DECREF(co);
+            co = NULL;
+        }
+    }
+
  error:
     Py_XDECREF(consts);
     Py_XDECREF(names);

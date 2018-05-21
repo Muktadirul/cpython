@@ -254,7 +254,7 @@ typedef union _gc_head {
         union _gc_head *gc_next;
         union _gc_head *gc_prev;
         Py_ssize_t gc_refs;
-    } gc;
+    };
     double dummy;  /* force worst-case alignment */
 } PyGC_Head;
 
@@ -268,16 +268,16 @@ extern PyGC_Head *_PyGC_generation0;
 #define _PyGC_REFS_SHIFT           (1)
 #define _PyGC_REFS_MASK            (((size_t) -1) << _PyGC_REFS_SHIFT)
 
-#define _PyGCHead_REFS(g) ((g)->gc.gc_refs >> _PyGC_REFS_SHIFT)
+#define _PyGCHead_REFS(g) ((g)->gc_refs >> _PyGC_REFS_SHIFT)
 #define _PyGCHead_SET_REFS(g, v) do { \
-    (g)->gc.gc_refs = ((g)->gc.gc_refs & ~_PyGC_REFS_MASK) \
+    (g)->gc_refs = ((g)->gc_refs & ~_PyGC_REFS_MASK) \
         | (((size_t)(v)) << _PyGC_REFS_SHIFT);             \
     } while (0)
-#define _PyGCHead_DECREF(g) ((g)->gc.gc_refs -= 1 << _PyGC_REFS_SHIFT)
+#define _PyGCHead_DECREF(g) ((g)->gc_refs -= 1 << _PyGC_REFS_SHIFT)
 
-#define _PyGCHead_FINALIZED(g) (((g)->gc.gc_refs & _PyGC_REFS_MASK_FINALIZED) != 0)
+#define _PyGCHead_FINALIZED(g) (((g)->gc_refs & _PyGC_REFS_MASK_FINALIZED) != 0)
 #define _PyGCHead_SET_FINALIZED(g, v) do {  \
-    (g)->gc.gc_refs = ((g)->gc.gc_refs & ~_PyGC_REFS_MASK_FINALIZED) \
+    (g)->gc_refs = ((g)->gc_refs & ~_PyGC_REFS_MASK_FINALIZED) \
         | (v != 0); \
     } while (0)
 
@@ -297,10 +297,10 @@ extern PyGC_Head *_PyGC_generation0;
     if (_PyGCHead_REFS(g) != _PyGC_REFS_UNTRACKED) \
         Py_FatalError("GC object already tracked"); \
     _PyGCHead_SET_REFS(g, _PyGC_REFS_REACHABLE); \
-    g->gc.gc_next = _PyGC_generation0; \
-    g->gc.gc_prev = _PyGC_generation0->gc.gc_prev; \
-    g->gc.gc_prev->gc.gc_next = g; \
-    _PyGC_generation0->gc.gc_prev = g; \
+    g->gc_next = _PyGC_generation0; \
+    g->gc_prev = _PyGC_generation0->gc_prev; \
+    g->gc_prev->gc_next = g; \
+    _PyGC_generation0->gc_prev = g; \
     } while (0);
 
 /* Tell the GC to stop tracking this object.
@@ -311,9 +311,9 @@ extern PyGC_Head *_PyGC_generation0;
     PyGC_Head *g = _Py_AS_GC(o); \
     assert(_PyGCHead_REFS(g) != _PyGC_REFS_UNTRACKED); \
     _PyGCHead_SET_REFS(g, _PyGC_REFS_UNTRACKED); \
-    g->gc.gc_prev->gc.gc_next = g->gc.gc_next; \
-    g->gc.gc_next->gc.gc_prev = g->gc.gc_prev; \
-    g->gc.gc_next = NULL; \
+    g->gc_prev->gc_next = g->gc_next; \
+    g->gc_next->gc_prev = g->gc_prev; \
+    g->gc_next = NULL; \
     } while (0);
 
 /* True if the object is currently tracked by the GC. */

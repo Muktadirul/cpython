@@ -34,12 +34,9 @@
 #define GC_DEBUG (0)  /* More asserts */
 
 // Bit 0 of gc_prev is used for _PyGC_PREV_MASK_FINALIZED in objimpl.h
-// These two mask bits are used only between GC.
-#define MASK_COLLECTING              (1 << 1)
-#define MASK_TENTATIVELY_UNREACHABLE (1 << 2)
+// Bit 1 These two mask bits are used only between GC.
+#define MASK_COLLECTING  _PyGC_PREV_MASK_COLLECTING
 
-#define IS_TENTATIVELY_UNREACHABLE(o) ( \
-    (_Py_AS_GC(o)->gc.gc_prev & MASK_TENTATIVELY_UNREACHABLE) != 0)
 
 static inline int
 gc_is_collecting(PyGC_Head *g)
@@ -50,7 +47,7 @@ gc_is_collecting(PyGC_Head *g)
 static inline void
 gc_clear_masks(PyGC_Head *g)
 {
-    g->gc.gc_prev &= ~(MASK_COLLECTING | MASK_TENTATIVELY_UNREACHABLE);
+    g->gc.gc_prev &= ~MASK_COLLECTING;
 }
 
 static inline Py_ssize_t
@@ -132,31 +129,31 @@ _PyGC_Initialize(struct _gc_runtime_state *state)
 gc_prev values.
 
 Between collections, gc_prev is used for doubly linked list.
+Lowest bits of gc_prev are used for MASK_TENTATIVELY_UNREACHABLE
 
-Lowest three bits of gc_prev are used for flags.
-MASK_COLLECTING and MASK_TENTATIVELY_UNREACHABLE are used only while
-collecting and cleared before GC ends or _PyObject_GC_UNTRACK() is called.
+During a collection, MASK_COLLECTING bit is set for objects in
+gc_list of generation currently GCed.
 
-During a collection, gc_prev is temporary used for gc_refs, and the gc list
-is singly linked until gc_prev is restored.
+And gc_prev is temporary used for gc_refs which takes these state:
 
-gc_refs
+>= 0
     At the start of a collection, update_refs() copies the true refcount
     to gc_refs, for each object in the generation being collected.
     subtract_refs() then adjusts gc_refs so that it equals the number of
     times an object is referenced directly from outside the generation
     being collected.
+    gc_refs remains >= 0 throughout these steps.
 
-MASK_COLLECTING
-    Objects in generation being collected are marked MASK_COLLECTING in
-    update_refs().
-
-MASK_TENTATIVELY_UNREACHABLE
+GC_TENTATIVELY_UNREACHABLE
     move_unreachable() then moves objects not reachable (whether directly or
-    indirectly) from outside the generation into an "unreachable" set and
-    set MASK_TENTATIVELY_UNREACHABLE flag.
+    indirectly) from outside the generation into an "unreachable" set.
+    Objects that are found to be reachable have gc_refs set to GC_REACHABLE
 
-    Objects that are found to be reachable have gc_refs set to 1.
+    Objects that are found to be unreachable have gc_refs set to
+    GC_TENTATIVELY_UNREACHABLE.  It's "tentatively" because the pass doing
+    this can't be sure until it ends, and GC_TENTATIVELY_UNREACHABLE may
+    transition back to 1.
+
     When MASK_TENTATIVELY_UNREACHABLE flag is set for the reachable object,
     the flag is unset and the object is moved back to "reachable" set.
 
@@ -164,6 +161,14 @@ MASK_TENTATIVELY_UNREACHABLE
     for collection.
 ----------------------------------------------------------------------------
 */
+
+#define GC_TENTATIVELY_UNREACHABLE (-1)
+
+static inline int
+gc_is_tentatively_unreachable(PyObject *o)
+{
+    return gc_get_refs(_Py_AS_GC(o)) == GC_TENTATIVELY_UNREACHABLE;
+}
 
 /*** list functions ***/
 

@@ -253,7 +253,7 @@ typedef union _gc_head {
     struct {
         union _gc_head *gc_next;  // NULL means the object is not tracked
         uintptr_t gc_prev;  // Pointer to previous object in the list.
-                            // Lowest three bits are used for flags.
+                            // Lowest two bits are used for flags.
     } gc;
     double dummy;  /* force worst-case alignment */
 } PyGC_Head;
@@ -265,10 +265,10 @@ extern PyGC_Head *_PyGC_generation0;
 /* Bit flags for gc_prev */
 /* Bit 0 is set when tp_finalize is called */
 #define _PyGC_PREV_MASK_FINALIZED  (1)
-/* Bit 1 and 2 is used in gcmodule.c */
-#define _PyGC_PREV_MASK_INTERNAL   (2 | 4)
-/* The (N-3) most significant bits contain the real address. */
-#define _PyGC_PREV_SHIFT           (3)
+/* Bit 1 is used in gcmodule.c */
+#define _PyGC_PREV_MASK_COLLECTING (2)
+/* The (N-2) most significant bits contain the real address. */
+#define _PyGC_PREV_SHIFT           (2)
 #define _PyGC_PREV_MASK            (((uintptr_t) -1) << _PyGC_PREV_SHIFT)
 
 #define _PyGCHead_PREV(g) ((PyGC_Head*)((g)->gc.gc_prev & _PyGC_PREV_MASK))
@@ -297,7 +297,7 @@ extern PyGC_Head *_PyGC_generation0;
     PyGC_Head *g = _Py_AS_GC(o); \
     if (g->gc.gc_next != NULL) \
         Py_FatalError("GC object already tracked"); \
-    assert((g->gc.gc_prev & _PyGC_PREV_MASK_INTERNAL) == 0); \
+    assert((g->gc.gc_prev & _PyGC_PREV_MASK_COLLECTING) == 0); \
     g->gc.gc_next = _PyGC_generation0; \
     _PyGCHead_SET_PREV(g, _PyGC_generation0->gc.gc_prev); \
     _PyGCHead_PREV(_PyGC_generation0)->gc.gc_next = g; \
@@ -306,8 +306,9 @@ extern PyGC_Head *_PyGC_generation0;
 
 /* Tell the GC to stop tracking this object.
  *
- * Internal note: This may be called while GC.  So _PyGC_PREV_MASK_INTERNAL must
- * be cleared.  Only _PyGC_PREV_MASK_FINALIZED bit is kept.
+ * Internal note: This may be called while GC.  So _PyGC_PREV_MASK_COLLECTING
+ * must be cleared.
+ * On the other hand, _PyGC_PREV_MASK_FINALIZED bit is kept after untracked.
  */
 #define _PyObject_GC_UNTRACK(o) do { \
     PyGC_Head *g = _Py_AS_GC(o); \

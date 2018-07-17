@@ -495,6 +495,70 @@ code_repr(PyCodeObject *co)
     }
 }
 
+/* ConstantKey -- Wrapper object used for constant dict key */
+
+typedef struct {
+    PyObject_HEAD
+    PyObject *ck_const;
+    PyObject *ck_fzkey;
+} _PyConstantKey;
+
+static void
+ck_dealloc(PyObject *self)
+{
+    PyObject *ck = (_PyConstantKey*)self;
+    Py_XDECREF(ck->ck_fzkey);
+    Py_DECREF(ck->ck_const);
+}
+
+static Py_hash_t
+ck_hash(PyObject *self)
+{
+    PyObject *ck = (_PyConstantKey*)self;
+}
+
+static PyObject* ck_richcompare(PyObject *self, PyObject *other, int op);
+
+PyTypeObject _PyConstantKey_Type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    "code",
+    sizeof(PyCodeObject),
+    .tp_dealloc = ck_dealloc,
+    .tp_hash = ck_hash,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_richcompare = ck_richcompare,
+}
+
+int _PyCode_CompareConstant(PyObject *v, PyObject *w);
+
+static PyObject*
+ck_richcompare(PyObject *self, PyObject *other, int op)
+{
+    PyObject *ck1 = (_PyConstantKey*)self;
+    assert(Py_TYPE(other) == &_PyConstantKey_Type);
+    PyObject *ck2 = (_PyConstantKey*)other;
+    int eq;
+
+    if (Py_TYPE(ck1->ck_const) != Py_TYPE(ck2->ck_const)) {
+        eq = 0;
+    }
+    else if (PyFrozenSet_CheckExact(ck1->ck_const)) {
+        assert(ck1->ck_fzkey != NULL);
+        assert(ck2->ck_fzkey != NULL);
+
+    }
+    else {
+        eq = _PyCode_CompareConstant(ck1->ck_const, ck2->ck_const);
+    }
+
+    if ((op == Py_EQ && eq) || (op == Py_NE && !eq)) {
+        Py_RETURN_TRUE;
+    }
+    else {
+        Py_RETURN_FALSE;
+    }
+}
+
 PyObject*
 _PyCode_ConstantKey(PyObject *op)
 {

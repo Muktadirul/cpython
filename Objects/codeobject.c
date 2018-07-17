@@ -625,12 +625,93 @@ _PyCode_ConstantKey(PyObject *op)
     return key;
 }
 
+// Helper comparing function for _PyCode_CompareConstant
+static int
+compare_float_const(double v, double w)
+{
+    if (v == 0.0 && w == 0.0) {
+        return copysign(1.0, v) == copysign(1.0, w);
+    }
+    else {
+        return v == w;
+    }
+}
+
+/* Compare two constant equality.
+ *
+ * Comparing constant is very different than normal comparison:
+ *
+ *   - 1.0 != 1
+ *   - -1.0 != 1.0
+ *
+ * Return value is same to PyObject_RichCompareBool(v, w, Py_EQ)
+ */
+int
+_PyCode_CompareConstant(PyObject *v, PyObject *w)
+{
+    if (v == w) {
+        return 1;
+    }
+    if (Py_TYPE(v) != Py_TYPE(w)) {
+        return 0;
+    }
+    if (v == Py_None ||
+            v == Py_True ||
+            v == Py_False ||
+            v == Py_Ellipsis) {
+        return 0;
+    }
+    if (PyBytes_CheckExact(v) || PyUnicode_CheckExact(v) ||
+            PyCode_Check(v) || PyLong_CheckExact(v)) {
+        return PyObject_RichCompareBool(v, w, Py_EQ);
+    }
+    if (PyFloat_CheckExact(v)) {
+        return compare_float_const(PyFloat_AsDouble(v), PyFloat_AsDouble(w));
+    }
+    if (PyComplex_CheckExact(v)) {
+        return
+            compare_float_const(PyComplex_RealAsDouble(v),
+                                PyComplex_RealAsDouble(w)) &&
+            compare_float_const(PyComplex_ImagAsDouble(v),
+                                PyComplex_ImagAsDouble(w));
+    }
+    if (PyTuple_CheckExact(v)) {
+        Py_ssize_t len = PyTuple_GET_SIZE(v);
+        if (len != PyTuple_GET_SIZE(w)) {
+            return 0;
+        }
+        for (Py_ssize_t i = 0; i < len; i++) {
+            if (!_PyCode_CompareConstant(
+                        PyTuple_GET_ITEM(v, i),
+                        PyTuple_GET_ITEM(w, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (PyFrozenSet_CheckExact(v)) {
+        PyObject *kv = _PyCode_ConstantKey(v);
+        if (kv == NULL) {
+            return -1;
+        }
+        PyObject *kw = _PyCode_ConstantKey(w);
+        if (kw == NULL) {
+            Py_DECREF(kv);
+            return -1;
+        }
+        int ret = PyObject_RichCompareBool(kv, kw, Py_EQ);
+        Py_DECREF(kv);
+        Py_DECREF(kw);
+        return ret;
+    }
+    return 0;
+}
+
 static PyObject *
 code_richcompare(PyObject *self, PyObject *other, int op)
 {
     PyCodeObject *co, *cp;
     int eq;
-    PyObject *consts1, *consts2;
     PyObject *res;
 
     if ((op != Py_EQ && op != Py_NE) ||
@@ -658,17 +739,7 @@ code_richcompare(PyObject *self, PyObject *other, int op)
     if (eq <= 0) goto unequal;
 
     /* compare constants */
-    consts1 = _PyCode_ConstantKey(co->co_consts);
-    if (!consts1)
-        return NULL;
-    consts2 = _PyCode_ConstantKey(cp->co_consts);
-    if (!consts2) {
-        Py_DECREF(consts1);
-        return NULL;
-    }
-    eq = PyObject_RichCompareBool(consts1, consts2, Py_EQ);
-    Py_DECREF(consts1);
-    Py_DECREF(consts2);
+    eq = _PyCode_CompareConstant(co->co_consts, cp->co_consts);
     if (eq <= 0) goto unequal;
 
     eq = PyObject_RichCompareBool(co->co_names, cp->co_names, Py_EQ);
